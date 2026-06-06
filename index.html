@@ -27,6 +27,9 @@
   #mute{position:fixed;left:14px;top:38px;z-index:6;pointer-events:auto;cursor:pointer;
     background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;
     border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;}
+  #wormToggle{position:fixed;left:14px;top:66px;z-index:6;pointer-events:auto;cursor:pointer;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;
+    border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;}
   #hint{left:50%;bottom:12px;transform:translateX(-50%);font-size:12px;opacity:.4;}
 
   #ov{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;
@@ -94,6 +97,7 @@
 
 <div id="top" class="hud hidden"><span id="online">0</span> snakes online</div>
 <button id="mute">&#9834; sound on</button>
+<button id="wormToggle">&#9678; wormholes on</button>
 <div id="score" class="hud hidden"><span style="opacity:.7">Your length</span><b id="len">0</b>
   <div class="meta">Rank <span id="rank">&ndash;</span> &nbsp;&middot;&nbsp; Eaten <span id="kills">0</span></div></div>
 <div id="board" class="hud hidden"><div class="t">Leaderboard</div><div id="rows"></div></div>
@@ -136,11 +140,12 @@
   const skinPrev=document.getElementById('skinPrev'), undoC=document.getElementById('undoC'), resetC=document.getElementById('resetC');
   const logoEl=document.getElementById('logo'), taglineEl=document.getElementById('tagline');
   const lenEl=document.getElementById('len'), rankEl=document.getElementById('rank'), killsEl=document.getElementById('kills');
-  const rowsEl=document.getElementById('rows'), resultEl=document.getElementById('result'), onlineEl=document.getElementById('online'), muteBtn=document.getElementById('mute');
+  const rowsEl=document.getElementById('rows'), resultEl=document.getElementById('result'), onlineEl=document.getElementById('online'), muteBtn=document.getElementById('mute'), wormToggle=document.getElementById('wormToggle');
+  let wormholesOn=true;
   const hud=[document.getElementById('top'), document.getElementById('score'), document.getElementById('board'), document.getElementById('hint')];
 
-  const MAX_SNAKES=33, AI_COUNT=32, TOTAL_POP=450, RUNNER_COUNT=10, FOOD_COUNT=750, FOOD_MAX=1800, TWO_PI=Math.PI*2;
-  const SPAWN_MIN=2050, SPAWN_MAX=2850, CULL_FOOD=3100, CULL_AI=3700, RADAR_R=2400, HEX=38;
+  const MAX_SNAKES=33, AI_COUNT=32, TOTAL_POP=450, RUNNER_COUNT=10, FOOD_COUNT=750, FOOD_MAX=2500, TWO_PI=Math.PI*2;
+  const SPAWN_MIN=2050, SPAWN_MAX=2850, CULL_FOOD=3100, CULL_AI=3700, RADAR_R=2400, HEX=38, PORTAL_PAIRS=3, PORTAL_R=40, RIFT_COUNT=2, RIFT_R=46;
 
   const PAL=[
     ['#19e6ff','#d6fbff'],['#2eff9e','#dffff0'],['#ffd23f','#fff3c4'],['#ff5d8f','#ffd0df'],
@@ -212,7 +217,14 @@
     o.type='triangle'; o.frequency.setValueAtTime(big?440:300,t); o.frequency.exponentialRampToValueAtTime(55,t+(big?0.5:0.24));
     g.gain.setValueAtTime(big?0.16:0.07,t); g.gain.exponentialRampToValueAtTime(0.0001,t+(big?0.5:0.27));
     o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+(big?0.55:0.3)); }
+  function sfxWarp(){ if(muted||!actx)return; const o=actx.createOscillator(),g=actx.createGain(),t=actx.currentTime;
+    o.type='sine'; o.frequency.setValueAtTime(200,t); o.frequency.exponentialRampToValueAtTime(880,t+0.16); o.frequency.exponentialRampToValueAtTime(150,t+0.34);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.11,t+0.03); g.gain.exponentialRampToValueAtTime(0.0001,t+0.37);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+0.4); }
   muteBtn.addEventListener('click',()=>{ muted=!muted; muteBtn.innerHTML=muted?'&#9834; sound off':'&#9834; sound on'; if(muted)stopBoost(); });
+  wormToggle.addEventListener('click',()=>{ wormholesOn=!wormholesOn; wormToggle.innerHTML=wormholesOn?'&#9678; wormholes on':'&#9678; wormholes off';
+    if(!wormholesOn){ portals=[]; rifts=[]; }
+    else if(running&&player){ portals=[]; for(let i=0;i<PORTAL_PAIRS;i++) portals.push(makePortalPair(false)); rifts=[]; for(let i=0;i<RIFT_COUNT;i++) rifts.push(makeRift(false)); } });
 
   // ---------- menu / customization ----------
   let pickColor=1, pickSkin=0;
@@ -253,11 +265,10 @@
     const r=h*0.3, yc=h*0.54, headX=w-r-12, tailX=r+12;
     spx.lineCap='round'; spx.lineJoin='round';
     spx.strokeStyle='rgba(0,0,0,0.3)'; spx.lineWidth=r*2+8; spx.beginPath(); spx.moveTo(tailX,yc); spx.lineTo(headX,yc); spx.stroke();
-    spx.strokeStyle='#1d2634'; spx.lineWidth=r*2; spx.beginPath(); spx.moveTo(tailX,yc); spx.lineTo(headX,yc); spx.stroke();
+    spx.strokeStyle='#070707'; spx.lineWidth=r*2; spx.beginPath(); spx.moveTo(tailX,yc); spx.lineTo(headX,yc); spx.stroke();
     const bw=Math.max(10, r*0.95);
-    spx.lineCap='butt'; spx.lineWidth=r*2;
-    for(let i=0;i<customSections.length;i++){ const x1=headX-r-i*bw, x0=x1-bw; if(x1<=tailX) break;
-      spx.strokeStyle=customSections[i]; spx.beginPath(); spx.moveTo(Math.max(x0,tailX),yc); spx.lineTo(x1,yc); spx.stroke(); }
+    if(customSections.length){ spx.lineCap='butt'; spx.lineWidth=r*2; let i=0;
+      for(let x1=headX-r; x1>tailX; x1-=bw, i++){ const x0=Math.max(x1-bw,tailX); spx.strokeStyle=customSections[i%customSections.length]; spx.beginPath(); spx.moveTo(x0,yc); spx.lineTo(x1,yc); spx.stroke(); } }
     spx.lineCap='round'; spx.strokeStyle='rgba(255,255,255,0.18)'; spx.lineWidth=r*0.55;
     spx.beginPath(); spx.moveTo(tailX,yc-r*0.36); spx.lineTo(headX,yc-r*0.36); spx.stroke();
     const hc=customSections[0]||'#e0843c';
@@ -277,7 +288,7 @@
   resetC.onclick=()=>{ customSections.length=0; refreshCustom(); };
   renderSkins(); renderBuilder();
 
-  const TIPS=['Boost by holding the mouse or space.','Trap others to make them crash.','Hunt the gold orbs \u2014 they run!','Cut off bigger snakes to eat them.','Eat the wreckage of fallen snakes.','The world never ends.'];
+  const TIPS=['Boost by holding the mouse or space.','Trap others to make them crash.','Hunt the gold orbs \u2014 they run!','Cut off bigger snakes to eat them.','Eat the wreckage of fallen snakes.','The world never ends.','Dive into a wormhole to slingshot out at free speed.','White rifts fling you far \u2014 and reward you.','Rifts may drop you next to a giant.','When a portal turns white it links somewhere new.','Farm the glowing anomaly for dense food.'];;
   const GAME_NAME='WYRMHOLE';
   const NEON=['#19e6ff','#3ad3fb','#6fb0ff','#9b8cff','#b56ff0','#cf5fe5','#e84fd6','#ff4dd2'];
   function playTitle(){
@@ -292,7 +303,7 @@
   playTitle();
 
   // ---------- state ----------
-  let food=[],snakes=[],bursts=[],player=null,running=false,last=0,prevBoost=false,vboard=[];
+  let food=[],snakes=[],bursts=[],portals=[],rifts=[],anomaly=null,destabTimer=0,player=null,running=false,last=0,prevBoost=false,vboard=[];
   function buildBoard(){
     const pool=NAMES.slice();
     for(let i=pool.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const tmp=pool[i]; pool[i]=pool[j]; pool[j]=tmp; }
@@ -306,9 +317,35 @@
     return {x:p.x,y:p.y,r:rand(3.5,5.5),c,val:rand(.9,1.6),ph:Math.random()*TWO_PI};}
   function makeDeathOrb(p,len,col){const c=col||PAL[(Math.random()*PAL.length)|0][0];
     return {x:p.x,y:p.y,r:rand(6.5,11),c,val:clamp(3+len*0.05,3.5,14),ph:Math.random()*TWO_PI};}
-  function spawnFood(initial){ if(food.length>=FOOD_MAX)return; const p=initial?ringPt(0,0,0,SPAWN_MAX):ringPt(pcx(),pcy(),SPAWN_MIN,SPAWN_MAX); food.push(makeFood(p)); }
+  function spawnFood(initial){ if(food.length>=FOOD_MAX)return; let p; if(!initial&&anomaly&&Math.random()<0.42){ p=ringPt(anomaly.x,anomaly.y,0,anomaly.r); } else { p=initial?ringPt(0,0,0,SPAWN_MAX):ringPt(pcx(),pcy(),SPAWN_MIN,SPAWN_MAX); } food.push(makeFood(p)); }
   function spawnRunner(initial){ const p=initial?ringPt(0,0,0,SPAWN_MAX):ringPt(pcx(),pcy(),SPAWN_MIN,SPAWN_MAX);
     food.push({x:p.x,y:p.y,r:rand(8.5,11),c:'#ffe14d',val:rand(6,12),ph:Math.random()*TWO_PI,dir:Math.random()*TWO_PI,flee:true}); }
+  function makePortalPair(initial){
+    const cx=initial?0:pcx(), cy=initial?0:pcy();
+    const base=ringPt(cx,cy, initial?500:SPAWN_MIN, SPAWN_MAX), a=Math.random()*TWO_PI, sep=rand(1700,3300);
+    return {ax:base.x,ay:base.y,bx:base.x+Math.cos(a)*sep,by:base.y+Math.sin(a)*sep,hue:(Math.random()*360)|0,phase:Math.random()*TWO_PI,destabT:0,chx:0,chy:0};
+  }
+  function makeAnomaly(initial){ const p=ringPt(initial?0:pcx(),initial?0:pcy(), initial?800:SPAWN_MIN, SPAWN_MAX); return {x:p.x,y:p.y,r:rand(760,1020),phase:Math.random()*TWO_PI}; }
+  function restreamAround(){ const lim=1700*1700;
+    for(const f of food){ const dx=f.x-player.x,dy=f.y-player.y; if(dx*dx+dy*dy>lim){ const a=Math.random()*TWO_PI,d=rand(1900,SPAWN_MAX); f.x=player.x+Math.cos(a)*d; f.y=player.y+Math.sin(a)*d; if(f.flee)f.dir=Math.random()*TWO_PI; } } }
+  function teleport(s,tx,ty,hue){
+    const col='hsl('+hue+',90%,62%)';
+    bursts.push({x:s.x,y:s.y,color:col,t:0,max:0.5}); bursts.push({x:tx,y:ty,color:col,t:0,max:0.5});
+    s.x=tx; s.y=ty; seedPath(s); rebuild(s); s.warpCD=1.5; s.surge=2.2;
+    if(s.isPlayer){ cam.x=tx; cam.y=ty; input.tx=tx+Math.cos(s.angle)*220; input.ty=ty+Math.sin(s.angle)*220; sfxWarp(); restreamAround(); }
+    else if(player&&player.alive&&Math.hypot(tx-player.x,ty-player.y)<1100) sfxWarp();
+  }
+  function makeRift(initial){ const p=initial?ringPt(0,0,800,SPAWN_MAX):ringPt(pcx(),pcy(),SPAWN_MIN,SPAWN_MAX); return {x:p.x,y:p.y,phase:Math.random()*TWO_PI}; }
+  function rewardCluster(x,y){ for(let i=0;i<16;i++){ if(food.length>=FOOD_MAX)break; const a=Math.random()*TWO_PI,d=rand(30,180); const o=makeDeathOrb({x:x+Math.cos(a)*d,y:y+Math.sin(a)*d},400,'#d6b3ff'); o.val=rand(2.5,5); food.push(o); } }
+  function riftWarp(s,rift){
+    let tx,ty,ta;
+    if(Math.random()<0.3){ const g=snakes.find(o=>o.alive&&!o.isPlayer&&o.length>800); if(g){ const a=Math.random()*TWO_PI,dd=radiusOf(g)+rand(140,300); tx=g.x+Math.cos(a)*dd; ty=g.y+Math.sin(a)*dd; ta=Math.atan2(g.y-ty,g.x-tx); } }
+    if(tx==null){ const a=Math.random()*TWO_PI,d=rand(5500,12000); tx=s.x+Math.cos(a)*d; ty=s.y+Math.sin(a)*d; ta=a; }
+    bursts.push({x:s.x,y:s.y,color:'#e9d4ff',t:0,max:0.7}); bursts.push({x:tx,y:ty,color:'#e9d4ff',t:0,max:0.7});
+    s.x=tx; s.y=ty; s.angle=ta; seedPath(s); rebuild(s); s.warpCD=1.8; s.surge=1.3;
+    cam.x=tx; cam.y=ty; input.tx=tx+Math.cos(ta)*240; input.ty=ty+Math.sin(ta)*240; sfxWarp(); restreamAround(); rewardCluster(tx,ty);
+    Object.assign(rift, makeRift(false));
+  }
 
   function applySkin(s,skinDef,base){
     s.skin=skinDef; s.base=base;
@@ -326,7 +363,7 @@
     const s={isPlayer,alive:true,x:pos.x,y:pos.y,angle:(opt.angle!=null?opt.angle:Math.random()*TWO_PI),
       length:opt.length||14,kills:0,path:[],segments:[],reach:0,boosting:false,
       name:isPlayer?(opt.name||'You'):NAMES[(Math.random()*NAMES.length)|0],
-      aiTimer:0,aiTarget:{x:pos.x,y:pos.y},boostTimer:0};
+      aiTimer:0,aiTarget:{x:pos.x,y:pos.y},boostTimer:0,warpCD:0,surge:0};
     applySkin(s,opt.skin||SKINS[(Math.random()*(SKINS.length-1))|0], opt.base||PAL[(Math.random()*PAL.length)|0][0]);
     seedPath(s); rebuild(s);
     return s;
@@ -361,13 +398,15 @@
     const sk=s.skin;
     if(sk.type==='solid') return s.base;
     if(sk.type==='rainbow') return 'hsl('+(((i*6)+t*0.05)%360|0)+',95%,62%)';
-    const c=s.cols, chunk=sk.type==='band'?5:2;
+    const c=s.cols;
     if(!c||!c.length) return s.base;
+    if(sk.type==='custom'){ return c[Math.floor(i/5)%c.length]; }
+    const chunk=sk.type==='band'?5:2;
     return c[Math.floor(i/chunk)%c.length];
   }
   function resolvePlayerSkin(){
     const sk=SKINS[pickSkin];
-    if(sk.type==='custom') return customSections.length?{type:'band',colors:customSections.slice()}:SKINS[0];
+    if(sk.type==='custom') return customSections.length?{type:'custom',colors:customSections.slice()}:SKINS[0];
     return sk;
   }
 
@@ -378,6 +417,9 @@
     snakes.push(player);
     for(let i=0;i<FOOD_COUNT;i++) spawnFood(true);
     for(let i=0;i<RUNNER_COUNT;i++) spawnRunner(true);
+    portals=[]; rifts=[];
+    if(wormholesOn){ for(let i=0;i<PORTAL_PAIRS;i++) portals.push(makePortalPair(true)); for(let i=0;i<RIFT_COUNT;i++) rifts.push(makeRift(true)); }
+    anomaly=makeAnomaly(true); destabTimer=rand(8,14);
     for(let i=0;i<AI_COUNT;i++){
       const big=i<7, d=big?rand(2400,SPAWN_MAX):rand(1300,SPAWN_MAX), a=Math.random()*TWO_PI;
       const pos={x:Math.cos(a)*d,y:Math.sin(a)*d};
@@ -402,7 +444,9 @@
   function killSnake(s){
     s.alive=false;
     bursts.push({x:s.x,y:s.y,color:s.glow,t:0,max:0.55});
-    for(let i=0;i<s.segments.length;i+=2){ if(food.length>=FOOD_MAX)break; const g=s.segments[i]; food.push(makeDeathOrb({x:g.x+rand(-8,8),y:g.y+rand(-8,8)},s.length,s.glow)); }
+    const n=Math.max(1,Math.min(s.segments.length>>1,220)), per=(s.length*0.72)/n;
+    for(let i=0,k=0;i<s.segments.length&&k<n;i+=2,k++){ if(food.length>=FOOD_MAX)break; const g=s.segments[i];
+      const orb=makeDeathOrb({x:g.x+rand(-9,9),y:g.y+rand(-9,9)},s.length,s.glow); orb.val=per; orb.r=clamp(4+per*0.55,5,17); food.push(orb); }
     if(s.isPlayer){ sfxDeath(true); gameOver(); }
     else if(player&&player.alive&&Math.hypot(s.x-player.x,s.y-player.y)<900) sfxDeath(false);
   }
@@ -426,7 +470,7 @@
 
     for(const s of snakes){
       if(!s.alive) continue;
-      const r=radiusOf(s),base=2.2+r*0.045,speed=(s.boosting?base*1.9:base)*dt*60;
+      const r=radiusOf(s),base=2.2+r*0.045; if(s.surge>0)s.surge-=dt; const speed=(s.boosting?base*1.9:base)*(s.surge>0?1.55:1)*dt*60;
       s.x+=Math.cos(s.angle)*speed; s.y+=Math.sin(s.angle)*speed;
       if(s.boosting){ s.length=Math.max(12,s.length-0.2*dt*60);
         if(food.length<FOOD_MAX&&Math.random()<0.35*dt*60){ const tl=s.segments[s.segments.length-1]||s; food.push({x:tl.x+rand(-5,5),y:tl.y+rand(-5,5),r:rand(3,4.6),c:s.glow,val:0.6,ph:Math.random()*TWO_PI}); } }
@@ -434,6 +478,25 @@
       rebuild(s);
     }
     if(!running) return;
+
+    destabTimer-=dt;
+    if(destabTimer<=0&&portals.length>1){ const pg=portals[(Math.random()*portals.length)|0]; let q=pg; while(q===pg) q=portals[(Math.random()*portals.length)|0];
+      const qe=Math.random()<0.5; pg.chx=qe?q.ax:q.bx; pg.chy=qe?q.ay:q.by; pg.destabT=rand(4.5,7.5); destabTimer=rand(9,16); }
+    for(const pg of portals){ if(pg.destabT>0) pg.destabT-=dt; }
+
+    for(const s of snakes){
+      if(!s.alive) continue;
+      if(s.warpCD>0){ s.warpCD-=dt; continue; }
+      const er=PORTAL_R+radiusOf(s)*0.35, er2=er*er;
+      for(const pg of portals){
+        const inA=(s.x-pg.ax)*(s.x-pg.ax)+(s.y-pg.ay)*(s.y-pg.ay)<er2, inB=(s.x-pg.bx)*(s.x-pg.bx)+(s.y-pg.by)*(s.y-pg.by)<er2;
+        if(inA||inB){ if(pg.destabT>0) teleport(s,pg.chx,pg.chy,290); else teleport(s, inA?pg.bx:pg.ax, inA?pg.by:pg.ay, pg.hue); break; }
+      }
+    }
+    for(const pg of portals){ const da=(pg.ax-player.x)*(pg.ax-player.x)+(pg.ay-player.y)*(pg.ay-player.y), db=(pg.bx-player.x)*(pg.bx-player.x)+(pg.by-player.y)*(pg.by-player.y); if(Math.min(da,db)>CULL_AI*CULL_AI) Object.assign(pg,makePortalPair(false)); }
+    if(player.warpCD<=0){ const re=RIFT_R+radiusOf(player)*0.35, re2=re*re; for(const rf of rifts){ if((player.x-rf.x)*(player.x-rf.x)+(player.y-rf.y)*(player.y-rf.y)<re2){ riftWarp(player,rf); break; } } }
+    for(const rf of rifts){ const dr=(rf.x-player.x)*(rf.x-player.x)+(rf.y-player.y)*(rf.y-player.y); if(dr>CULL_AI*CULL_AI) Object.assign(rf,makeRift(false)); }
+    if(anomaly){ const dax=anomaly.x-player.x,day=anomaly.y-player.y; if(dax*dax+day*day>(CULL_AI+anomaly.r)*(CULL_AI+anomaly.r)) Object.assign(anomaly,makeAnomaly(false)); }
 
     const pr=radiusOf(player),mag=pr+78,mag2=mag*mag,fleeR=255,fleeR2=fleeR*fleeR,rs=3.4*dt*60,cf2=CULL_FOOD*CULL_FOOD,cr2=CULL_AI*CULL_AI;
     for(const f of food){
@@ -453,7 +516,7 @@
 
     const deadBy=new Map();
     for(const s of snakes){
-      if(!s.alive) continue;
+      if(!s.alive||s.warpCD>0) continue;
       const hr=radiusOf(s)*0.9, sr=radiusOf(s);
       for(const o of snakes){
         if(o===s||!o.alive) continue;
@@ -529,12 +592,45 @@
     }
     if(!s.isPlayer){ ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font="500 "+Math.max(10,11*z)+"px 'Chakra Petch',sans-serif"; ctx.textAlign='center'; ctx.fillText(s.name,hx,hy-r-7); ctx.textAlign='left'; }
   }
+  function drawPortal(wx,wy,hue,phase,t,destab){    const p=w2s(wx,wy); if(p[0]<-90||p[0]>W+90||p[1]<-90||p[1]>H+90) return;
+    const z=cam.zoom,r=PORTAL_R*z*(destab?1.12+0.08*Math.sin(t*0.02):1),col=destab?'#ffffff':'hsl('+hue+',90%,62%)',sp=destab?0.011:0.0035;
+    ctx.save(); ctx.shadowColor=destab?'#d7c0ff':col; ctx.shadowBlur=r*(destab?1.2:0.9);
+    for(let k=0;k<4;k++){ const rr=r*(1-k*0.19), a0=t*sp*((k&1)?1:-1)+phase+k*1.3;
+      ctx.strokeStyle=destab?(k%2?'#ffffff':'#c39bff'):col; ctx.globalAlpha=0.85-k*0.13; ctx.lineWidth=Math.max(1.6,r*0.13);
+      ctx.beginPath(); ctx.arc(p[0],p[1],rr,a0,a0+Math.PI*(destab?1.0+0.5*Math.sin(t*0.01+k):1.35)); ctx.stroke(); }
+    ctx.globalAlpha=0.5; ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p[0],p[1],r*0.22,0,TWO_PI); ctx.fill();
+    ctx.restore(); ctx.globalAlpha=1;
+  }
+  function drawAnomaly(t){
+    if(!anomaly) return; const p=w2s(anomaly.x,anomaly.y),z=cam.zoom,R=anomaly.r*z;
+    if(p[0]<-R-40||p[0]>W+R+40||p[1]<-R-40||p[1]>H+R+40) return;
+    const g=ctx.createRadialGradient(p[0],p[1],R*0.1,p[0],p[1],R);
+    g.addColorStop(0,'rgba(124,92,255,0.12)'); g.addColorStop(0.7,'rgba(90,120,255,0.05)'); g.addColorStop(1,'rgba(90,120,255,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p[0],p[1],R,0,TWO_PI); ctx.fill();
+    ctx.save(); ctx.strokeStyle='rgba(150,130,255,0.22)'; ctx.lineWidth=2; ctx.setLineDash([12,15]); ctx.lineDashOffset=-t*0.03;
+    ctx.beginPath(); ctx.arc(p[0],p[1],R*0.96,0,TWO_PI); ctx.stroke(); ctx.restore();
+    for(let k=0;k<7;k++){ const a=t*0.0009*((k&1)?1:-1)+k*0.9+anomaly.phase, rr=R*(0.45+0.42*Math.sin(t*0.001+k*1.3));
+      ctx.fillStyle='rgba(185,165,255,0.5)'; ctx.beginPath(); ctx.arc(p[0]+Math.cos(a)*rr,p[1]+Math.sin(a)*rr,2.5*z,0,TWO_PI); ctx.fill(); }
+  }
+  function drawRift(rf,t){
+    const p=w2s(rf.x,rf.y); if(p[0]<-110||p[0]>W+110||p[1]<-110||p[1]>H+110) return;
+    const z=cam.zoom,r=(RIFT_R+Math.sin(t*0.006+rf.phase)*6)*z;
+    ctx.save(); ctx.shadowColor='#caa6ff'; ctx.shadowBlur=r*1.1;
+    for(let k=0;k<5;k++){ const rr=r*(1-k*0.16), a0=t*0.007*((k&1)?1:-1)+rf.phase+k*1.7;
+      ctx.strokeStyle=k%2?'#ffffff':'#b98cff'; ctx.globalAlpha=0.9-k*0.13; ctx.lineWidth=Math.max(1.5,r*0.1);
+      ctx.beginPath(); ctx.arc(p[0],p[1],rr,a0,a0+Math.PI*(1.1+0.3*Math.sin(t*0.004+k))); ctx.stroke(); }
+    ctx.globalAlpha=0.85; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p[0],p[1],r*0.16,0,TWO_PI); ctx.fill();
+    ctx.restore(); ctx.globalAlpha=1;
+  }
   function drawMini(){
     const R=60,cx=W-16-R,cy=H-16-R,scale=R/RADAR_R,rng2=RADAR_R*RADAR_R;
     ctx.save();
     ctx.beginPath();ctx.arc(cx,cy,R,0,TWO_PI);ctx.fillStyle='rgba(8,12,18,0.5)';ctx.fill();
     ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,0.18)';ctx.stroke();ctx.clip();
     for(const f of food){ if(!f.flee)continue; const dx=f.x-player.x,dy=f.y-player.y; if(dx*dx+dy*dy>rng2)continue; ctx.fillStyle='#ffe14d'; ctx.beginPath();ctx.arc(cx+dx*scale,cy+dy*scale,2,0,TWO_PI);ctx.fill(); }
+    for(const pg of portals){ for(const e of [[pg.ax,pg.ay],[pg.bx,pg.by]]){ const dx=e[0]-player.x,dy=e[1]-player.y; if(dx*dx+dy*dy>rng2)continue; ctx.fillStyle='hsl('+pg.hue+',90%,66%)'; ctx.beginPath();ctx.arc(cx+dx*scale,cy+dy*scale,2.6,0,TWO_PI);ctx.fill(); } }
+    for(const rf of rifts){ const dx=rf.x-player.x,dy=rf.y-player.y; if(dx*dx+dy*dy>rng2)continue; ctx.fillStyle='#ffffff'; ctx.beginPath();ctx.arc(cx+dx*scale,cy+dy*scale,3,0,TWO_PI);ctx.fill(); }
+    if(anomaly){ const dx=anomaly.x-player.x,dy=anomaly.y-player.y; ctx.strokeStyle='rgba(160,140,255,0.55)'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(cx+dx*scale,cy+dy*scale,Math.max(3,anomaly.r*scale),0,TWO_PI); ctx.stroke(); }
     for(const s of snakes){ if(!s.alive||s.isPlayer)continue; const dx=s.x-player.x,dy=s.y-player.y; if(dx*dx+dy*dy>rng2)continue; const big=s.length>200; ctx.fillStyle=big?'rgba(255,90,90,0.95)':'rgba(255,255,255,0.6)'; ctx.beginPath();ctx.arc(cx+dx*scale,cy+dy*scale,big?3:1.8,0,TWO_PI);ctx.fill(); }
     ctx.fillStyle='#3fd06a'; ctx.beginPath();ctx.arc(cx,cy,3.5,0,TWO_PI);ctx.fill();
     ctx.restore();
@@ -542,6 +638,7 @@
   function render(t){
     ctx.clearRect(0,0,W,H); ctx.fillStyle='#0e151d'; ctx.fillRect(0,0,W,H);
     drawHexGrid();
+    drawAnomaly(t);
     const z=cam.zoom,wob=t*0.004;
     for(const f of food){const p=w2s(f.x,f.y); if(p[0]<-30||p[0]>W+30||p[1]<-30||p[1]>H+30)continue;
       if(f.flee){ const pr=(f.r+Math.sin(wob*2+f.ph)*1.2)*z;
@@ -550,6 +647,8 @@
       } else { const pr=(f.r+Math.sin(wob+f.ph)*0.8)*z; ctx.fillStyle=f.c; ctx.shadowColor=f.c; ctx.shadowBlur=14*z; ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,TWO_PI); ctx.fill(); }
     }
     ctx.shadowBlur=0;
+    for(const pg of portals){ const ds=pg.destabT>0; drawPortal(pg.ax,pg.ay,pg.hue,pg.phase,t,ds); drawPortal(pg.bx,pg.by,pg.hue,pg.phase+1.6,t,ds); }
+    for(const rf of rifts) drawRift(rf,t);
     for(const bu of bursts){ const p=w2s(bu.x,bu.y),k=bu.t/bu.max; ctx.globalAlpha=(1-k)*0.6; ctx.strokeStyle=bu.color; ctx.lineWidth=3*z; ctx.beginPath();ctx.arc(p[0],p[1],(12+k*78)*z,0,TWO_PI);ctx.stroke(); ctx.globalAlpha=1; }
     for(const s of snakes){if(s.alive&&!s.isPlayer)drawSnake(s,t);}
     if(player.alive)drawSnake(player,t);
@@ -561,8 +660,9 @@
     const pl=Math.floor(player.length), drift=t*0.0002;
     let list=vboard.map((v,i)=>({name:v.name,score:v.score+Math.round(150*Math.sin(drift+i*1.7))}));
     let prank;
-    if(pl>list[list.length-1].score){ list.push({name:'You',score:pl,me:true}); list.sort((a,b)=>b.score-a.score); list=list.slice(0,10); prank=list.findIndex(e=>e.me)+1; }
-    else { prank=Math.max(1,Math.round(TOTAL_POP-(TOTAL_POP-1)*(1-Math.exp(-player.length/120)))); }
+    const minTop=list[list.length-1].score;
+    if(pl>minTop){ list.push({name:'You',score:pl,me:true}); list.sort((a,b)=>b.score-a.score); list=list.slice(0,10); prank=list.findIndex(e=>e.me)+1; }
+    else { prank=clamp(Math.round(10+(TOTAL_POP-10)*(1-pl/minTop)),11,TOTAL_POP); }
     rankEl.textContent=prank+' / '+TOTAL_POP;
     let html='';
     list.forEach((e,i)=>{ html+='<div class="row'+(e.me?' me':'')+'"><span class="rank">#'+(i+1)+'</span>'+e.name+'<span class="sc">'+e.score+'</span></div>'; });
