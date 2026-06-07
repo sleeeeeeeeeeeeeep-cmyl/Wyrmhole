@@ -30,6 +30,9 @@
   #wormToggle{position:fixed;left:14px;top:66px;z-index:6;pointer-events:auto;cursor:pointer;
     background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;
     border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;}
+  #gfxToggle{position:fixed;left:14px;top:94px;z-index:6;pointer-events:auto;cursor:pointer;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;
+    border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;}
   #hint{left:50%;bottom:12px;transform:translateX(-50%);font-size:12px;opacity:.4;}
 
   #ov{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;
@@ -98,6 +101,7 @@
 <div id="top" class="hud hidden"><span id="online">0</span> snakes online</div>
 <button id="mute">&#9834; sound on</button>
 <button id="wormToggle">&#9678; wormholes on</button>
+<button id="gfxToggle">graphics: high</button>
 <div id="score" class="hud hidden"><span style="opacity:.7">Your length</span><b id="len">0</b>
   <div class="meta">Rank <span id="rank">&ndash;</span> &nbsp;&middot;&nbsp; Eaten <span id="kills">0</span></div></div>
 <div id="board" class="hud hidden"><div class="t">Leaderboard</div><div id="rows"></div></div>
@@ -140,8 +144,8 @@
   const skinPrev=document.getElementById('skinPrev'), undoC=document.getElementById('undoC'), resetC=document.getElementById('resetC');
   const logoEl=document.getElementById('logo'), taglineEl=document.getElementById('tagline');
   const lenEl=document.getElementById('len'), rankEl=document.getElementById('rank'), killsEl=document.getElementById('kills');
-  const rowsEl=document.getElementById('rows'), resultEl=document.getElementById('result'), onlineEl=document.getElementById('online'), muteBtn=document.getElementById('mute'), wormToggle=document.getElementById('wormToggle');
-  let wormholesOn=true;
+  const rowsEl=document.getElementById('rows'), resultEl=document.getElementById('result'), onlineEl=document.getElementById('online'), muteBtn=document.getElementById('mute'), wormToggle=document.getElementById('wormToggle'), gfxToggle=document.getElementById('gfxToggle');
+  let wormholesOn=true, gfxLow=false;
   const hud=[document.getElementById('top'), document.getElementById('score'), document.getElementById('board'), document.getElementById('hint')];
 
   const MAX_SNAKES=33, AI_COUNT=32, TOTAL_POP=450, RUNNER_COUNT=10, FOOD_COUNT=750, FOOD_MAX=2500, TWO_PI=Math.PI*2;
@@ -183,7 +187,7 @@
 
   let W,H,dpr;
   function resize(){
-    dpr=Math.min(window.devicePixelRatio||1,2);
+    dpr=gfxLow?1:Math.min(window.devicePixelRatio||1,2);
     W=window.innerWidth; H=window.innerHeight;
     cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -225,6 +229,7 @@
   wormToggle.addEventListener('click',()=>{ wormholesOn=!wormholesOn; wormToggle.innerHTML=wormholesOn?'&#9678; wormholes on':'&#9678; wormholes off';
     if(!wormholesOn){ portals=[]; rifts=[]; }
     else if(running&&player){ portals=[]; for(let i=0;i<PORTAL_PAIRS;i++) portals.push(makePortalPair(false)); rifts=[]; for(let i=0;i<RIFT_COUNT;i++) rifts.push(makeRift(false)); } });
+  gfxToggle.addEventListener('click',()=>{ gfxLow=!gfxLow; gfxToggle.textContent=gfxLow?'graphics: low':'graphics: high'; resize(); });
 
   // ---------- menu / customization ----------
   let pickColor=1, pickSkin=0;
@@ -465,8 +470,9 @@
       s.boostTimer-=dt; if(s.boostTimer<=0){s.boosting=Math.random()<0.22&&s.length>30; s.boostTimer=rand(0.6,2.2);}
       if(s.length<=22) s.boosting=false;
     }
-    { const ddx=input.tx-player.x, ddy=input.ty-player.y, dz=radiusOf(player)+55;
-      if(ddx*ddx+ddy*ddy > dz*dz) player.angle+=clamp(angDiff(player.angle,Math.atan2(ddy,ddx)),-0.13,0.13)*dt*60; }
+    { const ddx=input.tx-player.x, ddy=input.ty-player.y, d=Math.hypot(ddx,ddy), dz=radiusOf(player)*1.5+70;
+      if(d>dz){ const want=Math.atan2(ddy,ddx), diff=angDiff(player.angle,want);
+        if(!(Math.abs(diff)>2.0 && d<dz*3.2)) player.angle+=clamp(diff,-0.12,0.12)*dt*60; } }
 
     for(const s of snakes){
       if(!s.alive) continue;
@@ -564,6 +570,7 @@
   }
   function drawHexGrid(){
     ctx.beginPath(); addHexes(0,0); ctx.fillStyle='#1b2634'; ctx.fill();
+    if(gfxLow) return;
     ctx.beginPath(); addHexes(1.6,1.9); ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=2; ctx.stroke();
     ctx.beginPath(); addHexes(-1,-1.2); ctx.strokeStyle='rgba(150,180,225,0.06)'; ctx.lineWidth=1.2; ctx.stroke();
   }
@@ -574,13 +581,15 @@
     if(s.maxx<cam.x-hw-wr||s.minx>cam.x+hw+wr||s.maxy<cam.y-hh-wr||s.miny>cam.y+hh+wr) return;
     const pts=segs.map(p=>w2s(p.x,p.y));
     ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.save(); ctx.shadowColor=s.glow; ctx.shadowBlur=r*1.5; ctx.strokeStyle=s.glow; ctx.globalAlpha=.4; ctx.lineWidth=r*2; linePath(pts); ctx.stroke(); ctx.restore();
+    if(!gfxLow){ ctx.save(); ctx.shadowColor=s.glow; ctx.shadowBlur=r*1.5; ctx.strokeStyle=s.glow; ctx.globalAlpha=.4; ctx.lineWidth=r*2; linePath(pts); ctx.stroke(); ctx.restore(); }
     ctx.strokeStyle='rgba(0,0,0,0.3)'; ctx.lineWidth=r*2+3*z; linePath(pts); ctx.stroke();
     for(let i=pts.length-1;i>=0;i--){ ctx.fillStyle=segColor(s,i,t); ctx.beginPath(); ctx.arc(pts[i][0],pts[i][1],r,0,TWO_PI); ctx.fill(); }
-    ctx.strokeStyle='rgba(0,0,0,0.1)'; ctx.lineWidth=Math.max(1,r*0.12); ctx.beginPath();
-    for(let i=2;i<pts.length-1;i+=2){ const a=pts[i-1],bb=pts[i+1],ang=Math.atan2(bb[1]-a[1],bb[0]-a[0]),nx=-Math.sin(ang)*r*0.92,ny=Math.cos(ang)*r*0.92; ctx.moveTo(pts[i][0]-nx,pts[i][1]-ny); ctx.lineTo(pts[i][0]+nx,pts[i][1]+ny); }
-    ctx.stroke();
-    ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=r*0.55; linePath(pts,-r*0.36); ctx.stroke();
+    if(!gfxLow){
+      ctx.strokeStyle='rgba(0,0,0,0.1)'; ctx.lineWidth=Math.max(1,r*0.12); ctx.beginPath();
+      for(let i=2;i<pts.length-1;i+=2){ const a=pts[i-1],bb=pts[i+1],ang=Math.atan2(bb[1]-a[1],bb[0]-a[0]),nx=-Math.sin(ang)*r*0.92,ny=Math.cos(ang)*r*0.92; ctx.moveTo(pts[i][0]-nx,pts[i][1]-ny); ctx.lineTo(pts[i][0]+nx,pts[i][1]+ny); }
+      ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=r*0.55; linePath(pts,-r*0.36); ctx.stroke();
+    }
     if(s.boosting){ const fl=clamp(0.26+0.32*Math.sin(t*0.025),0,0.6); ctx.globalAlpha=fl; ctx.strokeStyle='#fff'; ctx.lineWidth=r*2; linePath(pts); ctx.stroke(); ctx.globalAlpha=1; }
     const hx=pts[0][0],hy=pts[0][1],ex=Math.cos(s.angle),ey=Math.sin(s.angle),px=-ey,py=ex,eo=r*0.5,ef=r*0.55;
     for(const d of [1,-1]){
@@ -594,7 +603,7 @@
   }
   function drawPortal(wx,wy,hue,phase,t,destab){    const p=w2s(wx,wy); if(p[0]<-90||p[0]>W+90||p[1]<-90||p[1]>H+90) return;
     const z=cam.zoom,r=PORTAL_R*z*(destab?1.12+0.08*Math.sin(t*0.02):1),col=destab?'#ffffff':'hsl('+hue+',90%,62%)',sp=destab?0.011:0.0035;
-    ctx.save(); ctx.shadowColor=destab?'#d7c0ff':col; ctx.shadowBlur=r*(destab?1.2:0.9);
+    ctx.save(); if(!gfxLow){ctx.shadowColor=destab?'#d7c0ff':col; ctx.shadowBlur=r*(destab?1.2:0.9);}
     for(let k=0;k<4;k++){ const rr=r*(1-k*0.19), a0=t*sp*((k&1)?1:-1)+phase+k*1.3;
       ctx.strokeStyle=destab?(k%2?'#ffffff':'#c39bff'):col; ctx.globalAlpha=0.85-k*0.13; ctx.lineWidth=Math.max(1.6,r*0.13);
       ctx.beginPath(); ctx.arc(p[0],p[1],rr,a0,a0+Math.PI*(destab?1.0+0.5*Math.sin(t*0.01+k):1.35)); ctx.stroke(); }
@@ -604,9 +613,10 @@
   function drawAnomaly(t){
     if(!anomaly) return; const p=w2s(anomaly.x,anomaly.y),z=cam.zoom,R=anomaly.r*z;
     if(p[0]<-R-40||p[0]>W+R+40||p[1]<-R-40||p[1]>H+R+40) return;
-    const g=ctx.createRadialGradient(p[0],p[1],R*0.1,p[0],p[1],R);
+    if(gfxLow){ ctx.fillStyle='rgba(110,100,200,0.08)'; ctx.beginPath(); ctx.arc(p[0],p[1],R,0,TWO_PI); ctx.fill(); }
+    else { const g=ctx.createRadialGradient(p[0],p[1],R*0.1,p[0],p[1],R);
     g.addColorStop(0,'rgba(124,92,255,0.12)'); g.addColorStop(0.7,'rgba(90,120,255,0.05)'); g.addColorStop(1,'rgba(90,120,255,0)');
-    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p[0],p[1],R,0,TWO_PI); ctx.fill();
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p[0],p[1],R,0,TWO_PI); ctx.fill(); }
     ctx.save(); ctx.strokeStyle='rgba(150,130,255,0.22)'; ctx.lineWidth=2; ctx.setLineDash([12,15]); ctx.lineDashOffset=-t*0.03;
     ctx.beginPath(); ctx.arc(p[0],p[1],R*0.96,0,TWO_PI); ctx.stroke(); ctx.restore();
     for(let k=0;k<7;k++){ const a=t*0.0009*((k&1)?1:-1)+k*0.9+anomaly.phase, rr=R*(0.45+0.42*Math.sin(t*0.001+k*1.3));
@@ -615,7 +625,7 @@
   function drawRift(rf,t){
     const p=w2s(rf.x,rf.y); if(p[0]<-110||p[0]>W+110||p[1]<-110||p[1]>H+110) return;
     const z=cam.zoom,r=(RIFT_R+Math.sin(t*0.006+rf.phase)*6)*z;
-    ctx.save(); ctx.shadowColor='#caa6ff'; ctx.shadowBlur=r*1.1;
+    ctx.save(); if(!gfxLow){ctx.shadowColor='#caa6ff'; ctx.shadowBlur=r*1.1;}
     for(let k=0;k<5;k++){ const rr=r*(1-k*0.16), a0=t*0.007*((k&1)?1:-1)+rf.phase+k*1.7;
       ctx.strokeStyle=k%2?'#ffffff':'#b98cff'; ctx.globalAlpha=0.9-k*0.13; ctx.lineWidth=Math.max(1.5,r*0.1);
       ctx.beginPath(); ctx.arc(p[0],p[1],rr,a0,a0+Math.PI*(1.1+0.3*Math.sin(t*0.004+k))); ctx.stroke(); }
@@ -643,8 +653,8 @@
     for(const f of food){const p=w2s(f.x,f.y); if(p[0]<-30||p[0]>W+30||p[1]<-30||p[1]>H+30)continue;
       if(f.flee){ const pr=(f.r+Math.sin(wob*2+f.ph)*1.2)*z;
         ctx.strokeStyle='rgba(255,225,77,0.5)'; ctx.lineWidth=2*z; ctx.beginPath(); ctx.arc(p[0],p[1],pr+(6+Math.sin(wob*3+f.ph)*3)*z,0,TWO_PI); ctx.stroke();
-        ctx.fillStyle=f.c; ctx.shadowColor=f.c; ctx.shadowBlur=20*z; ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,TWO_PI); ctx.fill();
-      } else { const pr=(f.r+Math.sin(wob+f.ph)*0.8)*z; ctx.fillStyle=f.c; ctx.shadowColor=f.c; ctx.shadowBlur=14*z; ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,TWO_PI); ctx.fill(); }
+        ctx.fillStyle=f.c; if(!gfxLow){ctx.shadowColor=f.c; ctx.shadowBlur=20*z;} ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,TWO_PI); ctx.fill();
+      } else { const pr=(f.r+Math.sin(wob+f.ph)*0.8)*z; ctx.fillStyle=f.c; if(!gfxLow){ctx.shadowColor=f.c; ctx.shadowBlur=14*z;} ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,TWO_PI); ctx.fill(); }
     }
     ctx.shadowBlur=0;
     for(const pg of portals){ const ds=pg.destabT>0; drawPortal(pg.ax,pg.ay,pg.hue,pg.phase,t,ds); drawPortal(pg.bx,pg.by,pg.hue,pg.phase+1.6,t,ds); }
